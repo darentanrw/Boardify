@@ -230,7 +230,7 @@ async def generate_dsl_json(
         ),
         system=DSL_SYSTEM,
         response_format=_response_format("game_schema", json_schema),
-    ).text
+    )
     return _normalize_json_text(raw_output)
 
 
@@ -256,7 +256,7 @@ async def retry_with_errors(
         prompt=retry_prompt,
         system=DSL_SYSTEM,
         response_format=_response_format("game_schema", json_schema),
-    ).text
+    )
     return _normalize_json_text(corrected)
 
 
