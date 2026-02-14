@@ -24,9 +24,13 @@ class Settings(BaseSettings):
 
     # Default model per provider (optional overrides)
     DEFAULT_OPENAI_MODEL: str = "gpt-4o-mini"
+    DEFAULT_CODEX_MODEL: str = "codex-5.3-high"
     DEFAULT_ANTHROPIC_MODEL: str = "claude-3-5-haiku-20241022"
     DEFAULT_GEMINI_MODEL: str = "gemini-1.5-flash"
     DEFAULT_PERPLEXITY_MODEL: str = "sonar"
+
+    # Pipeline behavior
+    PIPELINE_MAX_RETRIES: int = 3
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
