@@ -6,6 +6,7 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "Boardify API"
     DEBUG: bool = False
+    LOG_LEVEL: str = "INFO"
     API_V1_PREFIX: str = "/api/v1"
 
     # CORS (comma-separated in .env, e.g. CORS_ORIGINS=http://localhost:3000,http://localhost:3001)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable
 from json import JSONDecodeError
+import logging
 
 from pydantic import ValidationError
 
@@ -21,6 +22,7 @@ from app.schemas.game import GameSchema
 
 
 RetryCallback = Callable[[int, ValidationError], Awaitable[None]]
+logger = logging.getLogger(__name__)
 CODEX_FALLBACK_MODEL_IDS = (
     "gpt-5.2-codex",
     "gpt-5.1-codex",
@@ -107,16 +109,32 @@ def _generate_with_codex(*, codex_model_id: str, prompt: str, system: str, **kwa
     for candidate_model in _codex_model_candidates(codex_model_id):
         codex = get_model("openai", candidate_model)
         request_kwargs = {**_codex_kwargs(), **kwargs}
+        logger.info(
+            "codex_request stage=generation candidate_model=%s reasoning_effort=%s",
+            candidate_model,
+            request_kwargs.get("reasoning_effort"),
+        )
         try:
-            return generate_text_sync(
+            text = generate_text_sync(
                 codex,
                 prompt=prompt,
                 system=system,
                 **request_kwargs,
             ).text
+            logger.info(
+                "codex_request_success stage=generation model=%s response_chars=%s",
+                candidate_model,
+                len(text),
+            )
+            return text
         except Exception as exc:  # noqa: BLE001
             if _is_model_not_found_error(exc):
                 last_error = exc
+                logger.warning(
+                    "codex_request_fallback stage=generation model=%s reason=%s",
+                    candidate_model,
+                    str(exc),
+                )
                 continue
             if "reasoning_effort" not in request_kwargs:
                 raise
@@ -124,15 +142,30 @@ def _generate_with_codex(*, codex_model_id: str, prompt: str, system: str, **kwa
                 k: v for k, v in request_kwargs.items() if k != "reasoning_effort"
             }
             try:
-                return generate_text_sync(
+                logger.info(
+                    "codex_request_retry_without_reasoning stage=generation model=%s",
+                    candidate_model,
+                )
+                text = generate_text_sync(
                     codex,
                     prompt=prompt,
                     system=system,
                     **fallback_kwargs,
                 ).text
+                logger.info(
+                    "codex_request_success stage=generation model=%s response_chars=%s",
+                    candidate_model,
+                    len(text),
+                )
+                return text
             except Exception as fallback_exc:  # noqa: BLE001
                 if _is_model_not_found_error(fallback_exc):
                     last_error = fallback_exc
+                    logger.warning(
+                        "codex_request_fallback stage=generation model=%s reason=%s",
+                        candidate_model,
+                        str(fallback_exc),
+                    )
                     continue
                 raise
 
