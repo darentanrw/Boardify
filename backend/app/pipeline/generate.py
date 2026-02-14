@@ -72,7 +72,6 @@ def _response_format(schema_name: str, schema: dict) -> dict:
         "json_schema": {
             "name": schema_name,
             "schema": schema,
-            "strict": True,
         },
     }
 
