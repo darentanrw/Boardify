@@ -21,6 +21,12 @@ from app.schemas.game import GameSchema
 
 
 RetryCallback = Callable[[int, ValidationError], Awaitable[None]]
+CODEX_FALLBACK_MODEL_IDS = (
+    "gpt-5.2-codex",
+    "gpt-5.1-codex",
+    "gpt-5-codex",
+    "gpt-4.1",
+)
 
 ALLOWED_OPERATION_NAMES = {
     "spawn_from_manifest",
@@ -74,27 +80,56 @@ def _codex_kwargs() -> dict:
     return {}
 
 
-def _generate_with_codex(*, codex, prompt: str, system: str, **kwargs) -> str:
-    request_kwargs = {**_codex_kwargs(), **kwargs}
-    try:
-        return generate_text_sync(
-            codex,
-            prompt=prompt,
-            system=system,
-            **request_kwargs,
-        ).text
-    except Exception:  # noqa: BLE001
-        if "reasoning_effort" not in request_kwargs:
-            raise
-        fallback_kwargs = {
-            k: v for k, v in request_kwargs.items() if k != "reasoning_effort"
-        }
-        return generate_text_sync(
-            codex,
-            prompt=prompt,
-            system=system,
-            **fallback_kwargs,
-        ).text
+def _codex_model_candidates(preferred_model_id: str) -> list[str]:
+    candidates = [preferred_model_id]
+    for candidate in CODEX_FALLBACK_MODEL_IDS:
+        if candidate not in candidates:
+            candidates.append(candidate)
+    return candidates
+
+
+def _is_model_not_found_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "model_not_found" in message or "does not exist or you do not have access" in message
+
+
+def _generate_with_codex(*, codex_model_id: str, prompt: str, system: str, **kwargs) -> str:
+    last_error: Exception | None = None
+    for candidate_model in _codex_model_candidates(codex_model_id):
+        codex = get_model("openai", candidate_model)
+        request_kwargs = {**_codex_kwargs(), **kwargs}
+        try:
+            return generate_text_sync(
+                codex,
+                prompt=prompt,
+                system=system,
+                **request_kwargs,
+            ).text
+        except Exception as exc:  # noqa: BLE001
+            if _is_model_not_found_error(exc):
+                last_error = exc
+                continue
+            if "reasoning_effort" not in request_kwargs:
+                raise
+            fallback_kwargs = {
+                k: v for k, v in request_kwargs.items() if k != "reasoning_effort"
+            }
+            try:
+                return generate_text_sync(
+                    codex,
+                    prompt=prompt,
+                    system=system,
+                    **fallback_kwargs,
+                ).text
+            except Exception as fallback_exc:  # noqa: BLE001
+                if _is_model_not_found_error(fallback_exc):
+                    last_error = fallback_exc
+                    continue
+                raise
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("Unable to generate with configured or fallback Codex models.")
 
 
 def _sanitize_generated_json(node):
@@ -160,9 +195,9 @@ async def generate_game_plan(
 ) -> str:
     """Generate a natural-language game architecture plan."""
 
-    codex = get_model("openai", codex_model_id or settings.DEFAULT_CODEX_MODEL)
+    codex_model = codex_model_id or settings.DEFAULT_CODEX_MODEL
     return _generate_with_codex(
-        codex=codex,
+        codex_model_id=codex_model,
         prompt=PLAN_USER.format(research_output=research_output),
         system=PLAN_SYSTEM,
     )
@@ -176,9 +211,9 @@ async def generate_dsl_json(
 ) -> str:
     """Generate game DSL JSON constrained by the provided schema."""
 
-    codex = get_model("openai", codex_model_id or settings.DEFAULT_CODEX_MODEL)
+    codex_model = codex_model_id or settings.DEFAULT_CODEX_MODEL
     raw_output = _generate_with_codex(
-        codex=codex,
+        codex_model_id=codex_model,
         prompt=DSL_USER.format(
             json_schema=json.dumps(json_schema, indent=2),
             uno_example=uno_example,
@@ -198,7 +233,7 @@ async def retry_with_errors(
 ) -> str:
     """Ask Codex to correct invalid JSON using validator feedback."""
 
-    codex = get_model("openai", codex_model_id or settings.DEFAULT_CODEX_MODEL)
+    codex_model = codex_model_id or settings.DEFAULT_CODEX_MODEL
     allowed_ops = ", ".join(sorted(ALLOWED_OPERATION_NAMES))
     retry_prompt = (
         RETRY_USER.format(validation_errors=validation_errors)
@@ -208,7 +243,7 @@ async def retry_with_errors(
         + allowed_ops
     )
     corrected = _generate_with_codex(
-        codex=codex,
+        codex_model_id=codex_model,
         prompt=retry_prompt,
         system=DSL_SYSTEM,
         response_format=_response_format("game_schema", json_schema),

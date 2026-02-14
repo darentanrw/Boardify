@@ -14,6 +14,13 @@ from app.pipeline.prompts.parse_research import PARSE_SYSTEM, PARSE_USER
 from app.pipeline.prompts.research import RESEARCH_SYSTEM, RESEARCH_USER
 from app.schemas.research import ResearchedRules
 
+CODEX_FALLBACK_MODEL_IDS = (
+    "gpt-5.2-codex",
+    "gpt-5.1-codex",
+    "gpt-5-codex",
+    "gpt-4.1",
+)
+
 
 def _response_format(schema_name: str, schema: dict) -> dict:
     """Build OpenAI json_schema response format payload."""
@@ -37,29 +44,58 @@ def _codex_kwargs() -> dict:
     return {}
 
 
-def _generate_with_codex(*, codex, prompt: str, system: str, **kwargs) -> str:
+def _codex_model_candidates(preferred_model_id: str) -> list[str]:
+    candidates = [preferred_model_id]
+    for candidate in CODEX_FALLBACK_MODEL_IDS:
+        if candidate not in candidates:
+            candidates.append(candidate)
+    return candidates
+
+
+def _is_model_not_found_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "model_not_found" in message or "does not exist or you do not have access" in message
+
+
+def _generate_with_codex(*, codex_model_id: str, prompt: str, system: str, **kwargs) -> str:
     """Generate text and gracefully retry without reasoning if unsupported."""
 
-    request_kwargs = {**_codex_kwargs(), **kwargs}
-    try:
-        return generate_text_sync(
-            codex,
-            prompt=prompt,
-            system=system,
-            **request_kwargs,
-        ).text
-    except Exception:  # noqa: BLE001
-        if "reasoning_effort" not in request_kwargs:
-            raise
-        fallback_kwargs = {
-            k: v for k, v in request_kwargs.items() if k != "reasoning_effort"
-        }
-        return generate_text_sync(
-            codex,
-            prompt=prompt,
-            system=system,
-            **fallback_kwargs,
-        ).text
+    last_error: Exception | None = None
+    for candidate_model in _codex_model_candidates(codex_model_id):
+        codex = get_model("openai", candidate_model)
+        request_kwargs = {**_codex_kwargs(), **kwargs}
+        try:
+            return generate_text_sync(
+                codex,
+                prompt=prompt,
+                system=system,
+                **request_kwargs,
+            ).text
+        except Exception as exc:  # noqa: BLE001
+            if _is_model_not_found_error(exc):
+                last_error = exc
+                continue
+            if "reasoning_effort" not in request_kwargs:
+                raise
+            fallback_kwargs = {
+                k: v for k, v in request_kwargs.items() if k != "reasoning_effort"
+            }
+            try:
+                return generate_text_sync(
+                    codex,
+                    prompt=prompt,
+                    system=system,
+                    **fallback_kwargs,
+                ).text
+            except Exception as fallback_exc:  # noqa: BLE001
+                if _is_model_not_found_error(fallback_exc):
+                    last_error = fallback_exc
+                    continue
+                raise
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("Unable to generate with configured or fallback Codex models.")
 
 
 def _load_json_from_llm(text: str) -> dict:
@@ -98,7 +134,7 @@ def parse_researched_rules(
     """Use Codex to parse markdown research text into ResearchedRules JSON."""
 
     schema = ResearchedRules.model_json_schema()
-    codex = get_model("openai", codex_model_id or settings.DEFAULT_CODEX_MODEL)
+    codex_model = codex_model_id or settings.DEFAULT_CODEX_MODEL
     retries = max(
         1,
         parse_max_retries if parse_max_retries is not None else settings.PIPELINE_MAX_RETRIES,
@@ -110,7 +146,7 @@ def parse_researched_rules(
     current_prompt = base_prompt
     for attempt in range(retries):
         parsed_text = _generate_with_codex(
-            codex=codex,
+            codex_model_id=codex_model,
             prompt=current_prompt,
             system=PARSE_SYSTEM,
             response_format=_response_format("researched_rules", schema),
