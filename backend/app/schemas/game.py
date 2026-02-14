@@ -28,6 +28,7 @@ from app.schemas.operations import (
     RevealOp,
     SetGlobalOp,
     SetPlayerVarOp,
+    ShuffleOp,
     TransitionPhaseOp,
     TriggerRoutineOp,
 )
@@ -223,7 +224,7 @@ class GameSchema(BaseModel):
                     f"Operation 'transition_phase' references unknown phase '{op.to}'."
                 )
         elif isinstance(op, TriggerRoutineOp):
-            if op.name not in routine_names:
+            if op.name not in routine_names and not op.name.startswith("_"):
                 raise ValueError(
                     f"Operation 'trigger_routine' references unknown routine '{op.name}'."
                 )
