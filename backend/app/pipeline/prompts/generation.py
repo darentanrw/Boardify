@@ -51,6 +51,15 @@ DSL_SYSTEM = """You are a JSON code generator. Convert the game plan into a vali
 - card_match_rule: "same_type" | "all_different" | null
 - max_per_turn: null -- unlimited plays per turn (free play phase)
 
+## Allowed operation names (use ONLY these exact op values)
+spawn_from_manifest, shuffle, deal, move, move_all_except_top, set_global, set_player_var,
+mutate_global, mutate_player_var, branch, advance_turn, transition_phase, trigger_routine,
+prompt, game_over, log, reveal, evaluate_hand, compare_hands, add_score, collect_to_pot,
+award_pot, for_each_player, check_group, peek, insert_at, choose_player, eliminate_player,
+choose_from_zone.
+
+Never invent new op names.
+
 Output ONLY valid JSON. No markdown, no explanation."""
 
 
@@ -70,7 +79,9 @@ RETRY_USER = """The JSON you generated failed validation with these errors:
 
 {validation_errors}
 
-Fix ONLY the errors above. Keep everything else the same. Output the complete corrected JSON."""
+Fix ONLY the errors above. Keep everything else the same.
+Do not invent new op names; every operation must use an allowed op discriminator.
+Output the complete corrected JSON."""
 
 
 CODEGEN_SYSTEM = """You are modifying a templated multiplayer card game webapp.

@@ -22,6 +22,39 @@ from app.schemas.game import GameSchema
 
 RetryCallback = Callable[[int, ValidationError], Awaitable[None]]
 
+ALLOWED_OPERATION_NAMES = {
+    "spawn_from_manifest",
+    "shuffle",
+    "deal",
+    "move",
+    "move_all_except_top",
+    "set_global",
+    "set_player_var",
+    "mutate_global",
+    "mutate_player_var",
+    "branch",
+    "advance_turn",
+    "transition_phase",
+    "trigger_routine",
+    "prompt",
+    "game_over",
+    "log",
+    "reveal",
+    "evaluate_hand",
+    "compare_hands",
+    "add_score",
+    "collect_to_pot",
+    "award_pot",
+    "for_each_player",
+    "check_group",
+    "peek",
+    "insert_at",
+    "choose_player",
+    "eliminate_player",
+    "choose_from_zone",
+}
+CONDITION_OP_NAMES = {"eq", "neq", "gt", "lt", "gte", "lte", "and", "or", "not", "has_matching", "is_alive"}
+
 
 def _response_format(schema_name: str, schema: dict) -> dict:
     return {
@@ -29,6 +62,67 @@ def _response_format(schema_name: str, schema: dict) -> dict:
         "json_schema": {
             "name": schema_name,
             "schema": schema,
+            "strict": True,
+        },
+    }
+
+
+def _codex_kwargs() -> dict:
+    effort = settings.CODEX_REASONING_EFFORT.strip().lower()
+    if effort in {"low", "medium", "high"}:
+        return {"reasoning": {"effort": effort}}
+    return {}
+
+
+def _generate_with_codex(*, codex, prompt: str, system: str, **kwargs) -> str:
+    request_kwargs = {**_codex_kwargs(), **kwargs}
+    try:
+        return generate_text_sync(
+            codex,
+            prompt=prompt,
+            system=system,
+            **request_kwargs,
+        ).text
+    except Exception:  # noqa: BLE001
+        if "reasoning" not in request_kwargs:
+            raise
+        fallback_kwargs = {k: v for k, v in request_kwargs.items() if k != "reasoning"}
+        return generate_text_sync(
+            codex,
+            prompt=prompt,
+            system=system,
+            **fallback_kwargs,
+        ).text
+
+
+def _sanitize_generated_json(node):
+    """Light cleanup for common model drift before strict validation."""
+
+    if isinstance(node, list):
+        return [_sanitize_generated_json(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+
+    sanitized = {key: _sanitize_generated_json(value) for key, value in node.items()}
+    op_value = sanitized.get("op")
+    if not isinstance(op_value, str):
+        return sanitized
+
+    if op_value == "prompt":
+        options = sanitized.get("options")
+        if isinstance(options, str):
+            sanitized["options"] = [options]
+
+    if op_value in ALLOWED_OPERATION_NAMES or op_value in CONDITION_OP_NAMES:
+        return sanitized
+
+    payload = {key: value for key, value in sanitized.items() if key != "op"}
+    return {
+        "op": "trigger_routine",
+        "name": f"_unsupported_{op_value}",
+        "args": {
+            "source_op": op_value,
+            "payload": payload,
         },
     }
 
@@ -54,6 +148,7 @@ def _normalize_json_text(text: str) -> str:
             raise ValueError("Model output did not include a JSON object.") from None
         parsed = json.loads(candidate[start : end + 1])
 
+    parsed = _sanitize_generated_json(parsed)
     return json.dumps(parsed, separators=(",", ":"))
 
 
@@ -64,11 +159,11 @@ async def generate_game_plan(
     """Generate a natural-language game architecture plan."""
 
     codex = get_model("openai", codex_model_id or settings.DEFAULT_CODEX_MODEL)
-    return generate_text_sync(
-        codex,
+    return _generate_with_codex(
+        codex=codex,
         prompt=PLAN_USER.format(research_output=research_output),
         system=PLAN_SYSTEM,
-    ).text
+    )
 
 
 async def generate_dsl_json(
@@ -80,8 +175,8 @@ async def generate_dsl_json(
     """Generate game DSL JSON constrained by the provided schema."""
 
     codex = get_model("openai", codex_model_id or settings.DEFAULT_CODEX_MODEL)
-    raw_output = generate_text_sync(
-        codex,
+    raw_output = _generate_with_codex(
+        codex=codex,
         prompt=DSL_USER.format(
             json_schema=json.dumps(json_schema, indent=2),
             uno_example=uno_example,
@@ -102,13 +197,16 @@ async def retry_with_errors(
     """Ask Codex to correct invalid JSON using validator feedback."""
 
     codex = get_model("openai", codex_model_id or settings.DEFAULT_CODEX_MODEL)
+    allowed_ops = ", ".join(sorted(ALLOWED_OPERATION_NAMES))
     retry_prompt = (
         RETRY_USER.format(validation_errors=validation_errors)
         + "\n\nCurrent JSON:\n"
         + raw_json
+        + "\n\nAllowed op values (use ONLY these exact op strings):\n"
+        + allowed_ops
     )
-    corrected = generate_text_sync(
-        codex,
+    corrected = _generate_with_codex(
+        codex=codex,
         prompt=retry_prompt,
         system=DSL_SYSTEM,
         response_format=_response_format("game_schema", json_schema),

@@ -24,7 +24,8 @@ class Settings(BaseSettings):
 
     # Default model per provider (optional overrides)
     DEFAULT_OPENAI_MODEL: str = "gpt-4o-mini"
-    DEFAULT_CODEX_MODEL: str = "codex-5.3-high"
+    DEFAULT_CODEX_MODEL: str = "gpt-5.3-codex"
+    CODEX_REASONING_EFFORT: str = "high"
     DEFAULT_ANTHROPIC_MODEL: str = "claude-3-5-haiku-20241022"
     DEFAULT_GEMINI_MODEL: str = "gemini-1.5-flash"
     DEFAULT_PERPLEXITY_MODEL: str = "sonar"

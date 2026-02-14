@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass
 from json import JSONDecodeError
 
+from pydantic import ValidationError
+
 from app.config import settings
 from app.llm import generate_text_sync, get_model
 from app.pipeline.prompts.parse_research import PARSE_SYSTEM, PARSE_USER
@@ -21,8 +23,41 @@ def _response_format(schema_name: str, schema: dict) -> dict:
         "json_schema": {
             "name": schema_name,
             "schema": schema,
+            "strict": True,
         },
     }
+
+
+def _codex_kwargs() -> dict:
+    """Common OpenAI kwargs for Codex-like reasoning models."""
+
+    effort = settings.CODEX_REASONING_EFFORT.strip().lower()
+    if effort in {"low", "medium", "high"}:
+        return {"reasoning": {"effort": effort}}
+    return {}
+
+
+def _generate_with_codex(*, codex, prompt: str, system: str, **kwargs) -> str:
+    """Generate text and gracefully retry without reasoning if unsupported."""
+
+    request_kwargs = {**_codex_kwargs(), **kwargs}
+    try:
+        return generate_text_sync(
+            codex,
+            prompt=prompt,
+            system=system,
+            **request_kwargs,
+        ).text
+    except Exception:  # noqa: BLE001
+        if "reasoning" not in request_kwargs:
+            raise
+        fallback_kwargs = {k: v for k, v in request_kwargs.items() if k != "reasoning"}
+        return generate_text_sync(
+            codex,
+            prompt=prompt,
+            system=system,
+            **fallback_kwargs,
+        ).text
 
 
 def _load_json_from_llm(text: str) -> dict:
@@ -56,24 +91,51 @@ def _load_json_from_llm(text: str) -> dict:
 def parse_researched_rules(
     raw_rules_text: str,
     codex_model_id: str | None = None,
+    parse_max_retries: int | None = None,
 ) -> ResearchedRules:
     """Use Codex to parse markdown research text into ResearchedRules JSON."""
 
     schema = ResearchedRules.model_json_schema()
     codex = get_model("openai", codex_model_id or settings.DEFAULT_CODEX_MODEL)
-    parsed_text = generate_text_sync(
-        codex,
-        prompt=PARSE_USER.format(
-            raw_rules_text=raw_rules_text,
-            research_schema=json.dumps(schema, indent=2),
-        ),
-        system=PARSE_SYSTEM,
-        response_format=_response_format("researched_rules", schema),
-    ).text
+    retries = max(
+        1,
+        parse_max_retries if parse_max_retries is not None else settings.PIPELINE_MAX_RETRIES,
+    )
+    base_prompt = PARSE_USER.format(
+        raw_rules_text=raw_rules_text,
+        research_schema=json.dumps(schema, indent=2),
+    )
+    current_prompt = base_prompt
+    for attempt in range(retries):
+        parsed_text = _generate_with_codex(
+            codex=codex,
+            prompt=current_prompt,
+            system=PARSE_SYSTEM,
+            response_format=_response_format("researched_rules", schema),
+        )
 
-    payload = _load_json_from_llm(parsed_text)
-    payload.setdefault("raw_rules_text", raw_rules_text)
-    return ResearchedRules.model_validate(payload)
+        payload = _load_json_from_llm(parsed_text)
+        payload.setdefault("raw_rules_text", raw_rules_text)
+        try:
+            return ResearchedRules.model_validate(payload)
+        except ValidationError as exc:
+            if attempt == retries - 1:
+                raise
+            current_prompt = (
+                f"{base_prompt}\n\n"
+                f"Your previous JSON failed validation:\n{exc}\n\n"
+                "Previous JSON:\n"
+                f"{json.dumps(payload, indent=2)}\n\n"
+                "Fix the JSON so it satisfies the schema exactly. Output ONLY valid JSON."
+            )
+
+    raise RuntimeError("Unreachable parse retry state.")
+
+
+def _format_property_value(value: object) -> str:
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, separators=(",", ":"), sort_keys=True)
+    return str(value)
 
 
 def serialize_to_rules_text(rules: ResearchedRules) -> str:
@@ -93,7 +155,9 @@ def serialize_to_rules_text(rules: ResearchedRules) -> str:
     for card_type in rules.card_types:
         count_note = f" ({card_type.count_rule})" if card_type.count_rule else ""
         props = (
-            ", ".join(f"{k}={v}" for k, v in card_type.properties.items())
+            ", ".join(
+                f"{k}={_format_property_value(v)}" for k, v in card_type.properties.items()
+            )
             if card_type.properties
             else ""
         )
