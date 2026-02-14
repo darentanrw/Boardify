@@ -33,7 +33,7 @@ def _codex_kwargs() -> dict:
 
     effort = settings.CODEX_REASONING_EFFORT.strip().lower()
     if effort in {"low", "medium", "high"}:
-        return {"reasoning": {"effort": effort}}
+        return {"reasoning_effort": effort}
     return {}
 
 
@@ -49,9 +49,11 @@ def _generate_with_codex(*, codex, prompt: str, system: str, **kwargs) -> str:
             **request_kwargs,
         ).text
     except Exception:  # noqa: BLE001
-        if "reasoning" not in request_kwargs:
+        if "reasoning_effort" not in request_kwargs:
             raise
-        fallback_kwargs = {k: v for k, v in request_kwargs.items() if k != "reasoning"}
+        fallback_kwargs = {
+            k: v for k, v in request_kwargs.items() if k != "reasoning_effort"
+        }
         return generate_text_sync(
             codex,
             prompt=prompt,
