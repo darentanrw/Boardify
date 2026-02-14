@@ -99,6 +99,7 @@ def _is_model_not_found_error(exc: Exception) -> bool:
         or "does not exist or you do not have access" in message
         or "not a chat model" in message
         or "not supported in the v1/chat/completions endpoint" in message
+        or "only supported in v1/responses" in message
     )
 
 
