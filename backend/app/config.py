@@ -6,6 +6,7 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "Boardify API"
     DEBUG: bool = False
+    LOG_LEVEL: str = "INFO"
     API_V1_PREFIX: str = "/api/v1"
 
     # CORS (comma-separated in .env, e.g. CORS_ORIGINS=http://localhost:3000,http://localhost:3001)
@@ -24,9 +25,14 @@ class Settings(BaseSettings):
 
     # Default model per provider (optional overrides)
     DEFAULT_OPENAI_MODEL: str = "gpt-4o-mini"
+    DEFAULT_CODEX_MODEL: str = "gpt-5.3-codex"
+    CODEX_REASONING_EFFORT: str = "high"
     DEFAULT_ANTHROPIC_MODEL: str = "claude-3-5-haiku-20241022"
     DEFAULT_GEMINI_MODEL: str = "gemini-1.5-flash"
     DEFAULT_PERPLEXITY_MODEL: str = "sonar"
+
+    # Pipeline behavior
+    PIPELINE_MAX_RETRIES: int = 3
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

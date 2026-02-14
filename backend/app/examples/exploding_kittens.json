@@ -1,0 +1,294 @@
+{
+  "meta": {
+    "game_name": "Exploding Kittens",
+    "version": "2.0",
+    "player_count": {
+      "min": 2,
+      "max": 5
+    },
+    "win_condition": "last_alive"
+  },
+  "assets": {
+    "deck_manifest": [
+      {
+        "id": "exploding_kitten",
+        "data": {
+          "type": "exploding_kitten"
+        },
+        "img": "exploding_kitten.png",
+        "per_combination": 4
+      },
+      {
+        "id": "defuse",
+        "data": {
+          "type": "defuse"
+        },
+        "img": "defuse.png",
+        "per_combination": 6
+      },
+      {
+        "id": "nope",
+        "data": {
+          "type": "nope"
+        },
+        "img": "nope.png",
+        "per_combination": 5
+      },
+      {
+        "id": "attack",
+        "data": {
+          "type": "attack"
+        },
+        "img": "attack.png",
+        "per_combination": 4
+      },
+      {
+        "id": "cat_card",
+        "template_vars": {
+          "cat": ["tacocat", "rainbow_cat", "beard_cat", "hairy_potato_cat"]
+        },
+        "data": {
+          "type": "cat",
+          "name": "{cat}"
+        },
+        "img": "{cat}.png",
+        "per_combination": 4
+      }
+    ]
+  },
+  "zones": {
+    "draw_pile": {
+      "behavior": "stack",
+      "visibility": "hidden",
+      "on_empty": {
+        "sequence": [
+          {
+            "op": "move_all_except_top",
+            "from": "discard_pile",
+            "to": "draw_pile"
+          },
+          {
+            "op": "shuffle",
+            "zone": "draw_pile"
+          }
+        ]
+      }
+    },
+    "discard_pile": {
+      "behavior": "stack",
+      "visibility": "top_only"
+    },
+    "player_hand": {
+      "behavior": "hand_fan",
+      "visibility": "owner_only",
+      "per_player": true
+    }
+  },
+  "variables": {
+    "global": {
+      "current_turn": {
+        "type": "number",
+        "default": 0
+      }
+    },
+    "per_player": {
+      "has_acted": {
+        "type": "boolean",
+        "default": false
+      },
+      "turns_remaining": {
+        "type": "number",
+        "default": 1
+      },
+      "is_alive": {
+        "type": "boolean",
+        "default": true
+      }
+    }
+  },
+  "card_effects": [],
+  "fsm": {
+    "turn_phases": ["turn_start", "play_cards", "must_draw", "turn_end"],
+    "routines": {
+      "setup": [
+        {
+          "op": "spawn_from_manifest",
+          "manifest": "deck_manifest",
+          "dest": "draw_pile"
+        },
+        {
+          "op": "shuffle",
+          "zone": "draw_pile"
+        },
+        {
+          "op": "deal",
+          "from": "draw_pile",
+          "count": 7,
+          "to": "all_players"
+        },
+        {
+          "op": "transition_phase",
+          "to": "turn_start"
+        }
+      ],
+      "turn_start": [
+        {
+          "op": "set_player_var",
+          "key": "has_acted",
+          "value": false
+        },
+        {
+          "op": "transition_phase",
+          "to": "play_cards"
+        }
+      ],
+      "turn_end": [
+        {
+          "op": "advance_turn"
+        },
+        {
+          "op": "transition_phase",
+          "to": "turn_start"
+        }
+      ]
+    },
+    "actions": {
+      "play_card": {
+        "phase": "play_cards",
+        "trigger": "click_card",
+        "source_zone": "player_hand",
+        "max_per_turn": null,
+        "reaction_window": {
+          "eligible_card_type": "nope",
+          "allows_chain": true
+        },
+        "sequence": [
+          {
+            "op": "move",
+            "entity": "$card",
+            "to": "discard_pile"
+          },
+          {
+            "op": "branch",
+            "condition": {
+              "op": "eq",
+              "val1": "$card.data.type",
+              "val2": "attack"
+            },
+            "if_true": [
+              {
+                "op": "mutate_player_var",
+                "key": "turns_remaining",
+                "mutation": "add",
+                "operand": 1
+              }
+            ],
+            "if_false": []
+          },
+          {
+            "op": "transition_phase",
+            "to": "play_cards"
+          }
+        ]
+      },
+      "draw_card": {
+        "phase": "must_draw",
+        "trigger": "click_zone",
+        "source_zone": "draw_pile",
+        "max_per_turn": 1,
+        "sequence": [
+          {
+            "op": "move",
+            "from": "draw_pile",
+            "count": 1,
+            "to": "$player.hand",
+            "store_as": "drawn_card"
+          },
+          {
+            "op": "branch",
+            "condition": {
+              "op": "eq",
+              "val1": "$args.drawn_card.data.type",
+              "val2": "exploding_kitten"
+            },
+            "if_true": [
+              {
+                "op": "branch",
+                "condition": {
+                  "op": "has_matching",
+                  "zone": "$player.hand",
+                  "field": "data.type",
+                  "count": 1
+                },
+                "if_true": [
+                  {
+                    "op": "move",
+                    "entity": "$player.hand.find(data.type=defuse)",
+                    "to": "discard_pile"
+                  },
+                  {
+                    "op": "insert_at",
+                    "entity": "$args.drawn_card",
+                    "zone": "draw_pile",
+                    "position": "player_choice"
+                  },
+                  {
+                    "op": "transition_phase",
+                    "to": "turn_end"
+                  }
+                ],
+                "if_false": [
+                  {
+                    "op": "eliminate_player",
+                    "player": "$current_player",
+                    "reason": "drew exploding kitten without defuse"
+                  },
+                  {
+                    "op": "move",
+                    "entity": "$args.drawn_card",
+                    "to": "discard_pile"
+                  },
+                  {
+                    "op": "transition_phase",
+                    "to": "turn_end"
+                  }
+                ]
+              }
+            ],
+            "if_false": [
+              {
+                "op": "transition_phase",
+                "to": "turn_end"
+              }
+            ]
+          }
+        ]
+      },
+      "play_nope": {
+        "phase": "play_cards",
+        "trigger": "reaction",
+        "source_zone": "player_hand",
+        "any_phase": true,
+        "max_per_turn": null,
+        "conditions": [
+          {
+            "op": "eq",
+            "val1": "$card.data.type",
+            "val2": "nope"
+          }
+        ],
+        "sequence": [
+          {
+            "op": "move",
+            "entity": "$card",
+            "to": "discard_pile"
+          },
+          {
+            "op": "log",
+            "message": "NOPED!"
+          }
+        ]
+      }
+    }
+  }
+}

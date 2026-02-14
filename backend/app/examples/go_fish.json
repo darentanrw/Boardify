@@ -1,0 +1,194 @@
+{
+  "meta": {
+    "game_name": "Go Fish",
+    "version": "2.0",
+    "player_count": {
+      "min": 2,
+      "max": 6
+    },
+    "win_condition": "most_sets"
+  },
+  "assets": {
+    "deck_manifest": [
+      {
+        "id": "{suit}_{rank}",
+        "template_vars": {
+          "suit": ["clubs", "diamonds", "hearts", "spades"],
+          "rank": ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
+        },
+        "data": {
+          "suit": "{suit}",
+          "rank": "{rank}",
+          "type": "standard"
+        },
+        "img": "{rank}_of_{suit}.png",
+        "per_combination": 1
+      }
+    ]
+  },
+  "zones": {
+    "draw_pile": {
+      "behavior": "stack",
+      "visibility": "hidden"
+    },
+    "player_hand": {
+      "behavior": "hand_fan",
+      "visibility": "owner_only",
+      "per_player": true
+    },
+    "player_sets": {
+      "behavior": "grid",
+      "visibility": "all",
+      "per_player": true
+    },
+    "discard_pile": {
+      "behavior": "stack",
+      "visibility": "top_only"
+    }
+  },
+  "variables": {
+    "global": {
+      "last_successful_ask": {
+        "type": "boolean",
+        "default": false
+      },
+      "last_requested_rank": {
+        "type": "string",
+        "default": null
+      }
+    },
+    "per_player": {
+      "sets_collected": {
+        "type": "number",
+        "default": 0
+      }
+    }
+  },
+  "card_effects": [],
+  "fsm": {
+    "turn_phases": ["ask_for_card", "go_fish_draw", "turn_end"],
+    "routines": {
+      "setup": [
+        {
+          "op": "spawn_from_manifest",
+          "manifest": "deck_manifest",
+          "dest": "draw_pile"
+        },
+        {
+          "op": "shuffle",
+          "zone": "draw_pile"
+        },
+        {
+          "op": "deal",
+          "from": "draw_pile",
+          "count": 7,
+          "to": "all_players"
+        },
+        {
+          "op": "transition_phase",
+          "to": "ask_for_card"
+        }
+      ]
+    },
+    "actions": {
+      "ask_player_for_rank": {
+        "phase": "ask_for_card",
+        "trigger": "click_card",
+        "source_zone": "player_hand",
+        "max_per_turn": 1,
+        "sequence": [
+          {
+            "op": "choose_player",
+            "player": "$current_player",
+            "message": "Choose a target player",
+            "exclude_self": true,
+            "store_as": "target_player"
+          },
+          {
+            "op": "prompt",
+            "player": "$current_player",
+            "kind": "text_input",
+            "message": "Which rank do you ask for?",
+            "store_as": "requested_rank"
+          },
+          {
+            "op": "set_global",
+            "key": "last_requested_rank",
+            "value": "$args.requested_rank"
+          },
+          {
+            "op": "branch",
+            "condition": {
+              "op": "has_matching",
+              "zone": "$args.target_player.hand",
+              "field": "data.rank",
+              "count": 1
+            },
+            "if_true": [
+              {
+                "op": "move",
+                "from": "$args.target_player.hand",
+                "count": 1,
+                "to": "$player.hand"
+              },
+              {
+                "op": "set_global",
+                "key": "last_successful_ask",
+                "value": true
+              },
+              {
+                "op": "transition_phase",
+                "to": "ask_for_card"
+              }
+            ],
+            "if_false": [
+              {
+                "op": "set_global",
+                "key": "last_successful_ask",
+                "value": false
+              },
+              {
+                "op": "transition_phase",
+                "to": "go_fish_draw"
+              }
+            ]
+          }
+        ]
+      },
+      "go_fish": {
+        "phase": "go_fish_draw",
+        "trigger": "click_zone",
+        "source_zone": "draw_pile",
+        "max_per_turn": 1,
+        "sequence": [
+          {
+            "op": "move",
+            "from": "draw_pile",
+            "count": 1,
+            "to": "$player.hand",
+            "store_as": "drawn_card"
+          },
+          {
+            "op": "transition_phase",
+            "to": "turn_end"
+          }
+        ]
+      },
+      "finish_turn": {
+        "phase": "turn_end",
+        "trigger": "click_button",
+        "ui_label": "End Turn",
+        "max_per_turn": 1,
+        "sequence": [
+          {
+            "op": "advance_turn"
+          },
+          {
+            "op": "transition_phase",
+            "to": "ask_for_card"
+          }
+        ]
+      }
+    }
+  }
+}
