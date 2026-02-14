@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 ResearchValue = str | int | float | bool | None
-ResearchProperty = ResearchValue | list["ResearchProperty"] | dict[str, "ResearchProperty"]
 
 
 class CardTypeResearch(BaseModel):
@@ -28,7 +27,7 @@ class CardTypeResearch(BaseModel):
             "e.g. 'players - 1'."
         ),
     )
-    properties: dict[str, ResearchProperty] = Field(
+    properties: dict[str, object] = Field(
         default_factory=dict,
         description="Card attributes like color, suit, rank, value, or tags.",
     )
@@ -188,6 +187,3 @@ class ResearchedRules(BaseModel):
         if self.player_count_max < self.player_count_min:
             raise ValueError("player_count_max must be >= player_count_min")
         return self
-
-
-CardTypeResearch.model_rebuild()
