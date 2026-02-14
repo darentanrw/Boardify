@@ -57,7 +57,7 @@ Output ONLY valid JSON. No markdown, no explanation."""
 DSL_USER = """## JSON Schema (your output MUST conform to this)
 {json_schema}
 
-## Complete Working Example (Uno)
+## Complete Working Example(s)
 {uno_example}
 
 ## Game Design Plan

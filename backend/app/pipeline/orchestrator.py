@@ -73,10 +73,17 @@ async def generate_game_dsl(
         await on_stage("dsl", "started")
     json_schema = GameSchema.model_json_schema()
     uno_example = _load_example("uno.json")
+    exploding_example = _load_example("exploding_kittens.json")
+    reference_examples = (
+        "### Uno\n"
+        f"{uno_example}\n\n"
+        "### Exploding Kittens\n"
+        f"{exploding_example}"
+    )
     raw_json = await generate_dsl_json(
         game_plan=game_plan,
         json_schema=json_schema,
-        uno_example=uno_example,
+        uno_example=reference_examples,
         codex_model_id=settings.DEFAULT_CODEX_MODEL,
     )
     if on_stage:
