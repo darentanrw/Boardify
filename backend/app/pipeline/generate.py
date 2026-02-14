@@ -25,6 +25,10 @@ CODEX_FALLBACK_MODEL_IDS = (
     "gpt-5.2-codex",
     "gpt-5.1-codex",
     "gpt-5-codex",
+    "gpt-5.2",
+    "gpt-5.1",
+    "gpt-5",
+    "gpt-5-chat-latest",
     "gpt-4.1",
 )
 
@@ -90,7 +94,12 @@ def _codex_model_candidates(preferred_model_id: str) -> list[str]:
 
 def _is_model_not_found_error(exc: Exception) -> bool:
     message = str(exc).lower()
-    return "model_not_found" in message or "does not exist or you do not have access" in message
+    return (
+        "model_not_found" in message
+        or "does not exist or you do not have access" in message
+        or "not a chat model" in message
+        or "not supported in the v1/chat/completions endpoint" in message
+    )
 
 
 def _generate_with_codex(*, codex_model_id: str, prompt: str, system: str, **kwargs) -> str:
